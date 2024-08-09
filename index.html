@@ -1,323 +1,218 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mensah Advanced Forex Candlestick Chart Simulator</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/brain.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/arima"></script>
+    <title>Forex Simulation</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        #container {
+            max-width: 800px;
+            margin: 20px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #chart {
+            width: 100%;
+            height: 400px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+    </style>
 </head>
-<body class="h-full bg-gray-100">
-    <div class="flex flex-col h-full p-4">
-        <div class="flex-none mb-4">
-            <h1 class="text-3xl font-bold text-center text-gray-800">Mensah Advanced Forex Candlestick Chart Simulator</h1>
-        </div>
-        <div id="controls" class="flex-none mb-4 space-x-4 flex justify-center items-center flex-wrap">
-            <button id="playBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-                Play
-            </button>
-            <button id="predictBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                Predict Future
-            </button>
-            <button id="exportBtn" class="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
-                Export Configuration
-            </button>
-            <select id="timeInterval" class="border rounded p-2">
-                <option value="5">5 minutes</option>
-                <option value="15">15 minutes</option>
-                <option value="240">4 hours</option>
-                <option value="1440" selected>1 day</option>
-            </select>
-            <select id="simulationMethod" class="border rounded p-2">
-                <option value="neurons">Neurons (BrainJS)</option>
-                <option value="markov">Markov</option>
-                <option value="monteCarlo">Monte Carlo</option>
-                <option value="markovMonteCarlo">Markov + Monte Carlo</option>
-                <option value="arima">ARIMA</option>
-            </select>
-            <input type="number" id="futureCandlesticks" class="border rounded p-2" placeholder="Candlesticks to predict" value="10">
-        </div>
-        <div class="flex-grow relative">
-            <div id="chart"></div>
-        </div>
+<body>
+<div id="container">
+    <h1>Forex Trading Simulation</h1>
+    <div id="chart"></div>
+    <div class="controls">
+        <button id="playBtn">Play</button>
+        <button id="predictBtn">Predict</button>
+        <button id="exportBtn">Export</button>
+        <select id="timeInterval">
+            <option value="1">1 Minute</option>
+            <option value="5">5 Minutes</option>
+            <option value="15">15 Minutes</option>
+            <option value="30">30 Minutes</option>
+            <option value="60">1 Hour</option>
+        </select>
+        <select id="simulationMethod">
+            <option value="neurons">Neural Network</option>
+            <option value="markov">Markov Chain</option>
+        </select>
+        <input type="number" id="futureCandlesticks" placeholder="Future Candlesticks">
     </div>
+</div>
 
-    <script>
-        let data = [];
-        let net = new brain.recurrent.LSTMTimeStep();
-        let isPlaying = false;
-        let playInterval;
-        let currentInterval = 1440; // Default to 1 day
-        const maxCandlesticks = 1000; // Maximum number of candlesticks to generate
-        const visibleCandlesticks = 100; // Number of candlesticks visible at once
-        let simulationMethod = 'neurons';
-        
-        // Simulation parameters
-        let volatility = 0.02;
-        let trend = 0.001;
-        let markovStates = ['up', 'down', 'stable'];
-        let markovTransitionMatrix = [
-            [0.6, 0.3, 0.1],
-            [0.3, 0.6, 0.1],
-            [0.2, 0.2, 0.6]
-        ];
-        let currentMarkovState = 0;
+<script>
+    let data = [];
+    let maxCandlesticks = 100;
+    let currentInterval = 1;
+    let simulationMethod = 'neurons';
+    let isPlaying = false;
+    let playInterval;
+    let visibleCandlesticks = 20;
 
-        function saveState() {
-            localStorage.setItem('forexSimulatorState', JSON.stringify({
-                data,
-                currentInterval,
-                simulationMethod,
-                volatility,
-                trend,
-                markovStates,
-                markovTransitionMatrix,
-                currentMarkovState
-            }));
+    function saveState() {
+        localStorage.setItem('data', JSON.stringify(data));
+        localStorage.setItem('currentInterval', currentInterval);
+        localStorage.setItem('simulationMethod', simulationMethod);
+    }
+
+    function loadState() {
+        const savedData = JSON.parse(localStorage.getItem('data')) || [];
+        data = savedData.length ? savedData : generateData(20, currentInterval, simulationMethod); // Default initial data
+        currentInterval = parseInt(localStorage.getItem('currentInterval'), 10) || 1;
+        simulationMethod = localStorage.getItem('simulationMethod') || 'neurons';
+        updateChart();
+    }
+
+    function generateData(num, interval, method) {
+        const lastClose = data.length ? data[data.length - 1].c : 1.0;
+        const generatedData = [];
+        for (let i = 0; i < num; i++) {
+            const forecast = method === 'neurons' ? generateNeuronsData(lastClose) : generateMarkovData(lastClose);
+            const [open, high, low, close] = generateCandlestickData(lastClose, forecast);
+            generatedData.push({
+                t: new Date(new Date().getTime() + i * interval * 60000),
+                o: open,
+                h: high,
+                l: low,
+                c: close,
+                buySignal: generateTradingSignals(open, high, low, close)[0],
+                sellSignal: generateTradingSignals(open, high, low, close)[1]
+            });
+            lastClose = close;
+        }
+        return generatedData;
+    }
+
+    function generateNeuronsData(lastClose) {
+        return lastClose + (Math.random() - 0.5) * 0.02;
+    }
+
+    function generateMarkovData(lastClose) {
+        return lastClose + (Math.random() - 0.5) * 0.01;
+    }
+
+    function generateCandlestickData(lastClose, forecast) {
+        const volatility = 0.01;
+        const open = lastClose;
+        const close = forecast;
+        const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+        const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+        return [open, high, low, close];
+    }
+
+    function generateTradingSignals(open, high, low, close) {
+        const buySignal = close > open;
+        const sellSignal = close < open;
+        return [buySignal, sellSignal];
+    }
+
+    function updateChart() {
+        const visibleData = data.slice(-visibleCandlesticks);
+
+        const trace = {
+            x: visibleData.map(d => d.t),
+            open: visibleData.map(d => d.o),
+            high: visibleData.map(d => d.h),
+            low: visibleData.map(d => d.l),
+            close: visibleData.map(d => d.c),
+            type: 'candlestick',
+            xaxis: 'x',
+            yaxis: 'y',
+        };
+
+        const layout = {
+            title: 'Forex Candlestick Chart',
+            xaxis: {
+                rangeslider: { visible: true }
+            }
+        };
+
+        Plotly.newPlot('chart', [trace], layout);
+    }
+
+    function simulateTrading() {
+        let balance = 1000; // Example starting balance
+        let position = null;
+
+        data.forEach((candle, index) => {
+            if (candle.buySignal && !position) {
+                position = { price: candle.c, index };
+            } else if (candle.sellSignal && position) {
+                balance += (candle.c - position.price) * 10; // Example lot size
+                position = null;
+            }
+        });
+
+        if (position) {
+            const lastCandle = data[data.length - 1];
+            balance += (lastCandle.c - position.price) * 10;
         }
 
-        function loadState() {
-            const savedState = localStorage.getItem('forexSimulatorState');
-            if (savedState) {
-                const state = JSON.parse(savedState);
-                data = state.data;
-                currentInterval = state.currentInterval;
-                simulationMethod = state.simulationMethod;
-                volatility = state.volatility;
-                trend = state.trend;
-                markovStates = state.markovStates;
-                markovTransitionMatrix = state.markovTransitionMatrix;
-                currentMarkovState = state.currentMarkovState;
-                document.getElementById('timeInterval').value = currentInterval;
-                document.getElementById('simulationMethod').value = simulationMethod;
+        alert('Simulation complete. Final balance: $' + balance.toFixed(2));
+    }
+
+    document.getElementById('playBtn').addEventListener('click', function () {
+        isPlaying = !isPlaying;
+        this.textContent = isPlaying ? 'Pause' : 'Play';
+        if (isPlaying) {
+            playInterval = setInterval(() => {
+                data.push(...generateData(1, currentInterval, simulationMethod));
+                if (data.length > maxCandlesticks) {
+                    data = data.slice(data.length - maxCandlesticks);
+                }
                 updateChart();
-            }
+                saveState();
+            }, 1000);
+        } else {
+            clearInterval(playInterval);
         }
+    });
 
-        function generateData(count, interval, method) {
-            let generatedData = [];
-            let lastClose = data.length > 0 ? data[data.length - 1].c : 100;
-            let baseDate = data.length > 0 ? new Date(data[data.length - 1].t) : new Date();
+    document.getElementById('predictBtn').addEventListener('click', function () {
+        const futureCandlesticks = parseInt(document.getElementById('futureCandlesticks').value, 10) || 10;
+        const futureData = generateData(futureCandlesticks, currentInterval, simulationMethod);
+        data.push(...futureData);
+        updateChart();
+        saveState();
+    });
 
-            for (let i = 0; i < count; i++) {
-                let open, high, low, close, buySignal, sellSignal;
+    document.getElementById('exportBtn').addEventListener('click', function () {
+        const exportedData = JSON.stringify(data);
+        const blob = new Blob([exportedData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'forex_simulation_data.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
 
-                switch (method) {
-                    case 'neurons':
-                        [open, high, low, close] = generateNeuronsData(lastClose);
-                        break;
-                    case 'markov':
-                        [open, high, low, close] = generateMarkovData(lastClose);
-                        break;
-                    case 'monteCarlo':
-                        [open, high, low, close] = generateMonteCarloData(lastClose);
-                        break;
-                    case 'markovMonteCarlo':
-                        [open, high, low, close] = generateMarkovMonteCarloData(lastClose);
-                        break;
-                    case 'arima':
-                        [open, high, low, close] = generateARIMAData(lastClose);
-                        break;
-                }
+    document.getElementById('timeInterval').addEventListener('change', function () {
+        currentInterval = parseInt(this.value, 10);
+        saveState();
+    });
 
-                [buySignal, sellSignal] = generateTradingSignals(open, high, low, close);
-                
-                generatedData.push({
-                    t: new Date(baseDate.getTime() + (i + 1) * interval * 60000),
-                    o: open,
-                    h: high,
-                    l: low,
-                    c: close,
-                    buySignal,
-                    sellSignal
-                });
+    document.getElementById('simulationMethod').addEventListener('change', function () {
+        simulationMethod = this.value;
+        saveState();
+    });
 
-                lastClose = close;
-            }
-            return generatedData;
-        }
-
-        function generateNeuronsData(lastClose) {
-            const prediction = net.run([lastClose]);
-            const open = lastClose;
-            const close = prediction;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMarkovData(lastClose) {
-            const stateChange = Math.random();
-            let cumulativeProbability = 0;
-            for (let i = 0; i < markovStates.length; i++) {
-                cumulativeProbability += markovTransitionMatrix[currentMarkovState][i];
-                if (stateChange < cumulativeProbability) {
-                    currentMarkovState = i;
-                    break;
-                }
-            }
-
-            let change;
-            switch (markovStates[currentMarkovState]) {
-                case 'up':
-                    change = lastClose * (trend + volatility * Math.random());
-                    break;
-                case 'down':
-                    change = lastClose * (-trend - volatility * Math.random());
-                    break;
-                case 'stable':
-                    change = lastClose * volatility * (Math.random() * 2 - 1);
-                    break;
-            }
-
-            const close = lastClose + change;
-            const open = lastClose;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMonteCarloData(lastClose) {
-            const change = lastClose * (trend + volatility * (Math.random() * 2 - 1));
-            const close = lastClose + change;
-            const open = lastClose;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMarkovMonteCarloData(lastClose) {
-            const markovData = generateMarkovData(lastClose);
-            const monteCarloData = generateMonteCarloData(lastClose);
-            return [
-                (markovData[0] + monteCarloData[0]) / 2,
-                Math.max(markovData[1], monteCarloData[1]),
-                Math.min(markovData[2], monteCarloData[2]),
-                (markovData[3] + monteCarloData[3]) / 2
-            ];
-        }
-
-        function generateARIMAData(lastClose) {
-            const arimaModel = new ARIMA({
-                p: 1,
-                d: 1,
-                q: 1,
-                verbose: false
-            });
-            
-            const historicalData = data.slice(-20).map(d => d.c);
-            arimaModel.train(historicalData);
-            const [forecast] = arimaModel.predict(1);
-            
-            const open = lastClose;
-            const close = forecast;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateTradingSignals(open, high, low, close) {
-            const buySignal = close > open;
-            const sellSignal = close < open;
-            return [buySignal, sellSignal];
-        }
-
-        function updateChart() {
-            const visibleData = data.slice(-visibleCandlesticks);
-            
-            const trace = {
-                x: visibleData.map(d => d.t),
-                open: visibleData.map(d => d.o),
-                high: visibleData.map(d => d.h),
-                low: visibleData.map(d => d.l),
-                close: visibleData.map(d => d.c),
-                type: 'candlestick',
-                xaxis: 'x',
-                yaxis: 'y',
-            };
-
-            const layout = {
-                title: 'Forex Candlestick Chart',
-                xaxis: {
-                    rangeslider: { visible: true }
-                }
-            };
-
-            Plotly.newPlot('chart', [trace], layout);
-        }
-
-        function simulateTrading() {
-            let balance = 1000; // Example starting balance
-            let position = null;
-
-            data.forEach((candle, index) => {
-                if (candle.buySignal && !position) {
-                    position = { price: candle.c, index };
-                } else if (candle.sellSignal && position) {
-                    balance += (candle.c - position.price) * 10; // Example lot size
-                    position = null;
-                }
-            });
-
-            if (position) {
-                const lastCandle = data[data.length - 1];
-                balance += (lastCandle.c - position.price) * 10;
-            }
-
-            alert('Simulation complete. Final balance: $' + balance.toFixed(2));
-        }
-
-        document.getElementById('playBtn').addEventListener('click', function () {
-            isPlaying = !isPlaying;
-            this.textContent = isPlaying ? 'Pause' : 'Play';
-            if (isPlaying) {
-                playInterval = setInterval(() => {
-                    data.push(...generateData(1, currentInterval, simulationMethod));
-                    if (data.length > maxCandlesticks) {
-                        data = data.slice(data.length - maxCandlesticks);
-                    }
-                    updateChart();
-                    saveState();
-                }, 1000);
-            } else {
-                clearInterval(playInterval);
-            }
-        });
-
-        document.getElementById('predictBtn').addEventListener('click', function () {
-            const futureCandlesticks = parseInt(document.getElementById('futureCandlesticks').value, 10) || 10;
-            const futureData = generateData(futureCandlesticks, currentInterval, simulationMethod);
-            data.push(...futureData);
-            updateChart();
-            saveState();
-        });
-
-        document.getElementById('exportBtn').addEventListener('click', function () {
-            const exportedData = JSON.stringify(data);
-            const blob = new Blob([exportedData], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'forex_simulation_data.json';
-            a.click();
-            URL.revokeObjectURL(url);
-        });
-
-        document.getElementById('timeInterval').addEventListener('change', function () {
-            currentInterval = parseInt(this.value, 10);
-            saveState();
-        });
-
-        document.getElementById('simulationMethod').addEventListener('change', function () {
-            simulationMethod = this.value;
-            saveState();
-        });
-
-        // Load saved state if available
-        loadState();
-    </script>
+    // Load saved state if available
+    loadState();
+</script>
 </body>
 </html>
