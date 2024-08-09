@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Forex Candlestick Chart Simulator</title>
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
     <script src="https://unpkg.com/brain.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/arima"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
 </head>
 <body class="h-full bg-gray-100">
     <div class="flex flex-col h-full p-4">
@@ -33,14 +33,17 @@
                 <option value="1440" selected>1 day</option>
             </select>
             <select id="simulationMethod" class="border rounded p-2">
-                <option value="brainjs">BrainJS</option>
-                <option value="monteCarlo">Monte Carlo</option>
+                <option value="neurons">Neurons (BrainJS)</option>
                 <option value="markov">Markov</option>
-                <option value="monteCarloMarkov">Monte Carlo + Markov</option>
+                <option value="monteCarlo">Monte Carlo</option>
+                <option value="markovMonteCarlo">Markov + Monte Carlo</option>
+                <option value="arima">ARIMA</option>
             </select>
             <input type="number" id="futureCandlesticks" class="border rounded p-2" placeholder="Candlesticks to predict" value="10">
         </div>
-        <div id="chart" class="flex-grow" style="overflow-x: auto;"></div>
+        <div class="flex-grow relative">
+            <canvas id="chart"></canvas>
+        </div>
     </div>
 
     <script>
@@ -52,7 +55,7 @@
         let currentInterval = 1440; // Default to 1 day
         const maxCandlesticks = 1000; // Maximum number of candlesticks to generate
         const visibleCandlesticks = 100; // Number of candlesticks visible at once
-        let simulationMethod = 'brainjs';
+        let simulationMethod = 'neurons';
         
         // Simulation parameters
         let volatility = 0.02;
@@ -98,30 +101,40 @@
 
         function generateData(count, interval, method) {
             let generatedData = [];
-            let lastClose = data.length > 0 ? data[data.length - 1].y[3] : 100;
-            let baseDate = data.length > 0 ? new Date(data[data.length - 1].x) : new Date();
+            let lastClose = data.length > 0 ? data[data.length - 1].c : 100;
+            let baseDate = data.length > 0 ? new Date(data[data.length - 1].t) : new Date();
 
             for (let i = 0; i < count; i++) {
-                let open, high, low, close;
+                let open, high, low, close, buySignal, sellSignal;
 
                 switch (method) {
-                    case 'brainjs':
-                        [open, high, low, close] = generateBrainJSData(lastClose);
-                        break;
-                    case 'monteCarlo':
-                        [open, high, low, close] = generateMonteCarloData(lastClose);
+                    case 'neurons':
+                        [open, high, low, close] = generateNeuronsData(lastClose);
                         break;
                     case 'markov':
                         [open, high, low, close] = generateMarkovData(lastClose);
                         break;
-                    case 'monteCarloMarkov':
-                        [open, high, low, close] = generateMonteCarloMarkovData(lastClose);
+                    case 'monteCarlo':
+                        [open, high, low, close] = generateMonteCarloData(lastClose);
+                        break;
+                    case 'markovMonteCarlo':
+                        [open, high, low, close] = generateMarkovMonteCarloData(lastClose);
+                        break;
+                    case 'arima':
+                        [open, high, low, close] = generateARIMAData(lastClose);
                         break;
                 }
+
+                [buySignal, sellSignal] = generateTradingSignals(open, high, low, close);
                 
                 generatedData.push({
-                    x: new Date(baseDate.getTime() + (i + 1) * interval * 60000).getTime(),
-                    y: [open, high, low, close]
+                    t: new Date(baseDate.getTime() + (i + 1) * interval * 60000),
+                    o: open,
+                    h: high,
+                    l: low,
+                    c: close,
+                    buySignal,
+                    sellSignal
                 });
 
                 lastClose = close;
@@ -129,19 +142,10 @@
             return generatedData;
         }
 
-        function generateBrainJSData(lastClose) {
+        function generateNeuronsData(lastClose) {
             const prediction = net.run([lastClose]);
             const open = lastClose;
             const close = prediction;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMonteCarloData(lastClose) {
-            const change = lastClose * (trend + volatility * (Math.random() * 2 - 1));
-            const close = lastClose + change;
-            const open = lastClose;
             const high = Math.max(open, close) + Math.random() * volatility * lastClose;
             const low = Math.min(open, close) - Math.random() * volatility * lastClose;
             return [open, high, low, close];
@@ -178,7 +182,16 @@
             return [open, high, low, close];
         }
 
-        function generateMonteCarloMarkovData(lastClose) {
+        function generateMonteCarloData(lastClose) {
+            const change = lastClose * (trend + volatility * (Math.random() * 2 - 1));
+            const close = lastClose + change;
+            const open = lastClose;
+            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+            return [open, high, low, close];
+        }
+
+        function generateMarkovMonteCarloData(lastClose) {
             const markovData = generateMarkovData(lastClose);
             const monteCarloData = generateMonteCarloData(lastClose);
             return [
@@ -189,73 +202,82 @@
             ];
         }
 
+        function generateARIMAData(lastClose) {
+            const arimaModel = new ARIMA({
+                p: 1,
+                d: 1,
+                q: 1,
+                verbose: false
+            });
+            
+            const historicalData = data.slice(-20).map(d => d.c);
+            arimaModel.train(historicalData);
+            const [forecast] = arimaModel.predict(1);
+            
+            const open = lastClose;
+            const close = forecast;
+            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+            return [open, high, low, close];
+        }
+
+        function generateTradingSignals(open, high, low, close) {
+            const buySignal = Math.random() > 0.7;  // 30% chance of buy signal
+            const sellSignal = Math.random() > 0.7; // 30% chance of sell signal
+            return [buySignal, sellSignal];
+        }
+
         function createChart() {
-            const options = {
-                series: [{
-                    data: data.slice(-visibleCandlesticks)
-                }],
-                chart: {
-                    type: 'candlestick',
-                    height: '100%',
-                    animations: {
-                        enabled: true,
-                        easing: 'linear',
-                        dynamicAnimation: {
-                            speed: 350
+            const ctx = document.getElementById('chart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'candlestick',
+                data: {
+                    datasets: [{
+                        label: 'Candlestick Chart',
+                        data: data
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day'
+                            }
+                        },
+                        y: {
+                            position: 'right'
                         }
                     },
-                    toolbar: {
-                        show: false
-                    }
-                },
-                title: {
-                    text: `Forex Candlestick Chart (${currentInterval} min)`,
-                    align: 'left'
-                },
-                xaxis: {
-                    type: 'datetime',
-                    labels: {
-                        formatter: function(val) {
-                            return new Date(val).toLocaleString();
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const d = context.raw;
+                                    return [
+                                        `Open: ${d.o.toFixed(2)}`,
+                                        `High: ${d.h.toFixed(2)}`,
+                                        `Low: ${d.l.toFixed(2)}`,
+                                        `Close: ${d.c.toFixed(2)}`,
+                                        `Buy Signal: ${d.buySignal ? 'Yes' : 'No'}`,
+                                        `Sell Signal: ${d.sellSignal ? 'Yes' : 'No'}`
+                                    ];
+                                }
+                            }
                         }
-                    }
-                },
-                yaxis: {
-                    tooltip: {
-                        enabled: true
-                    },
-                    opposite: true
-                },
-                tooltip: {
-                    enabled: true,
-                    custom: function({seriesIndex, dataPointIndex, w}) {
-                        const o = w.globals.seriesCandleO[seriesIndex][dataPointIndex];
-                        const h = w.globals.seriesCandleH[seriesIndex][dataPointIndex];
-                        const l = w.globals.seriesCandleL[seriesIndex][dataPointIndex];
-                        const c = w.globals.seriesCandleC[seriesIndex][dataPointIndex];
-                        return (
-                            '<div class="apexcharts-tooltip-box">' +
-                            '<div>Open: ' + o.toFixed(2) + '</div>' +
-                            '<div>High: ' + h.toFixed(2) + '</div>' +
-                            '<div>Low: ' + l.toFixed(2) + '</div>' +
-                            '<div>Close: ' + c.toFixed(2) + '</div>' +
-                            '</div>'
-                        );
                     }
                 }
-            };
-
-            chart = new ApexCharts(document.querySelector("#chart"), options);
-            chart.render();
+            });
         }
 
         function updateChart() {
-            chart.updateSeries([{ data: data.slice(-visibleCandlesticks) }]);
-            chart.updateOptions({
-                title: {
-                    text: `Forex Candlestick Chart (${currentInterval} min)`
-                }
-            });
+            chart.data.datasets[0].data = data.slice(-visibleCandlesticks);
+            chart.update();
         }
 
         function predictFuture(candlesticks) {
@@ -296,7 +318,7 @@
         document.getElementById('exportBtn').addEventListener('click', function() {
             const config = {
                 data: data,
-                chartOptions: chart.opts,
+                currentInterval,
                 simulationMethod,
                 volatility,
                 trend,
@@ -333,7 +355,7 @@
         createChart();
 
         // Train initial BrainJS model
-        net.train([data.map(d => d.y[3])], { iterations: 100, log: true });
+        net.train([data.map(d => d.c)], { iterations: 100, log: true });
     </script>
 </body>
 </html>
