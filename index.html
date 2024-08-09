@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candlestick Chart Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://unpkg.com/brain.js"></script>
+    <style>
+        #chart {
+            max-width: 800px;
+            margin: 35px auto;
+        }
+        #controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="trainBtn">Train</button>
+    </div>
+    <div id="chart"></div>
+
+    <script>
+        // Initialize data
+        let data = [];
+        const totalPoints = 50;
+        let lastClose = 100;
+
+        // Generate initial random data
+        for (let i = 0; i < totalPoints; i++) {
+            const open = lastClose + (Math.random() - 0.5) * 5;
+            const close = open + (Math.random() - 0.5) * 5;
+            const high = Math.max(open, close) + Math.random() * 2;
+            const low = Math.min(open, close) - Math.random() * 2;
+            
+            data.push({
+                x: new Date(2024, 0, i + 1).getTime(),
+                y: [open, high, low, close]
+            });
+
+            lastClose = close;
+        }
+
+        // Initialize chart
+        const options = {
+            series: [{
+                data: data
+            }],
+            chart: {
+                type: 'candlestick',
+                height: 400
+            },
+            title: {
+                text: 'Candlestick Chart Simulator',
+                align: 'left'
+            },
+            xaxis: {
+                type: 'datetime'
+            },
+            yaxis: {
+                tooltip: {
+                    enabled: true
+                }
+            }
+        };
+
+        const chart = new ApexCharts(document.querySelector("#chart"), options);
+        chart.render();
+
+        // Initialize brain.js network
+        const net = new brain.recurrent.LSTMTimeStep();
+
+        // Train button functionality
+        document.getElementById('trainBtn').addEventListener('click', function() {
+            const lastIndex = data.length - 1;
+            const newClose = parseFloat(prompt("Enter new close price for the last candlestick:", data[lastIndex].y[3]));
+            
+            if (!isNaN(newClose)) {
+                data[lastIndex].y[3] = newClose;
+                data[lastIndex].y[1] = Math.max(data[lastIndex].y[1], newClose);
+                data[lastIndex].y[2] = Math.min(data[lastIndex].y[2], newClose);
+
+                // Train the network
+                const trainingData = data.map(d => d.y[3]);
+                net.train([trainingData], { iterations: 100, log: true });
+
+                // Generate new predictions
+                const input = trainingData.slice(-5);
+                const output = net.run(input);
+
+                // Add new prediction to data
+                const newDataPoint = {
+                    x: new Date(data[lastIndex].x).getTime() + 86400000, // Next day
+                    y: [output, output + Math.random() * 2, output - Math.random() * 2, output]
+                };
+                data.push(newDataPoint);
+
+                // Update chart
+                chart.updateSeries([{ data: data }]);
+            }
+        });
+    </script>
+</body>
+</html>
