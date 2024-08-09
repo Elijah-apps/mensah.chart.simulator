@@ -32,9 +32,15 @@
                 <option value="240">4 hours</option>
                 <option value="1440" selected>1 day</option>
             </select>
+            <select id="simulationMethod" class="border rounded p-2">
+                <option value="brainjs">BrainJS</option>
+                <option value="monteCarlo">Monte Carlo</option>
+                <option value="markov">Markov</option>
+                <option value="monteCarloMarkov">Monte Carlo + Markov</option>
+            </select>
             <input type="number" id="futureCandlesticks" class="border rounded p-2" placeholder="Candlesticks to predict" value="10">
         </div>
-        <div id="chart" class="flex-grow"></div>
+        <div id="chart" class="flex-grow" style="overflow-x: auto;"></div>
     </div>
 
     <script>
@@ -44,21 +50,77 @@
         let isPlaying = false;
         let playInterval;
         let currentInterval = 1440; // Default to 1 day
-        const maxCandlesticks = 100; // Maximum number of candlesticks to display
+        const maxCandlesticks = 1000; // Maximum number of candlesticks to generate
+        const visibleCandlesticks = 100; // Number of candlesticks visible at once
+        let simulationMethod = 'brainjs';
+        
+        // Simulation parameters
+        let volatility = 0.02;
+        let trend = 0.001;
+        let markovStates = ['up', 'down', 'stable'];
+        let markovTransitionMatrix = [
+            [0.6, 0.3, 0.1],
+            [0.3, 0.6, 0.1],
+            [0.2, 0.2, 0.6]
+        ];
+        let currentMarkovState = 0;
 
-        function generateData(count, interval) {
+        function saveState() {
+            localStorage.setItem('forexSimulatorState', JSON.stringify({
+                data,
+                currentInterval,
+                simulationMethod,
+                volatility,
+                trend,
+                markovStates,
+                markovTransitionMatrix,
+                currentMarkovState
+            }));
+        }
+
+        function loadState() {
+            const savedState = localStorage.getItem('forexSimulatorState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                data = state.data;
+                currentInterval = state.currentInterval;
+                simulationMethod = state.simulationMethod;
+                volatility = state.volatility;
+                trend = state.trend;
+                markovStates = state.markovStates;
+                markovTransitionMatrix = state.markovTransitionMatrix;
+                currentMarkovState = state.currentMarkovState;
+                document.getElementById('timeInterval').value = currentInterval;
+                document.getElementById('simulationMethod').value = simulationMethod;
+                updateChart();
+            }
+        }
+
+        function generateData(count, interval, method) {
             let generatedData = [];
-            let lastClose = 100;
-            let baseDate = new Date();
+            let lastClose = data.length > 0 ? data[data.length - 1].y[3] : 100;
+            let baseDate = data.length > 0 ? new Date(data[data.length - 1].x) : new Date();
 
             for (let i = 0; i < count; i++) {
-                const open = lastClose + (Math.random() - 0.5) * 5;
-                const close = open + (Math.random() - 0.5) * 5;
-                const high = Math.max(open, close) + Math.random() * 2;
-                const low = Math.min(open, close) - Math.random() * 2;
+                let open, high, low, close;
+
+                switch (method) {
+                    case 'brainjs':
+                        [open, high, low, close] = generateBrainJSData(lastClose);
+                        break;
+                    case 'monteCarlo':
+                        [open, high, low, close] = generateMonteCarloData(lastClose);
+                        break;
+                    case 'markov':
+                        [open, high, low, close] = generateMarkovData(lastClose);
+                        break;
+                    case 'monteCarloMarkov':
+                        [open, high, low, close] = generateMonteCarloMarkovData(lastClose);
+                        break;
+                }
                 
                 generatedData.push({
-                    x: new Date(baseDate.getTime() - (count - i - 1) * interval * 60000).getTime(),
+                    x: new Date(baseDate.getTime() + (i + 1) * interval * 60000).getTime(),
                     y: [open, high, low, close]
                 });
 
@@ -67,10 +129,70 @@
             return generatedData;
         }
 
+        function generateBrainJSData(lastClose) {
+            const prediction = net.run([lastClose]);
+            const open = lastClose;
+            const close = prediction;
+            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+            return [open, high, low, close];
+        }
+
+        function generateMonteCarloData(lastClose) {
+            const change = lastClose * (trend + volatility * (Math.random() * 2 - 1));
+            const close = lastClose + change;
+            const open = lastClose;
+            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+            return [open, high, low, close];
+        }
+
+        function generateMarkovData(lastClose) {
+            const stateChange = Math.random();
+            let cumulativeProbability = 0;
+            for (let i = 0; i < markovStates.length; i++) {
+                cumulativeProbability += markovTransitionMatrix[currentMarkovState][i];
+                if (stateChange < cumulativeProbability) {
+                    currentMarkovState = i;
+                    break;
+                }
+            }
+
+            let change;
+            switch (markovStates[currentMarkovState]) {
+                case 'up':
+                    change = lastClose * (trend + volatility * Math.random());
+                    break;
+                case 'down':
+                    change = lastClose * (-trend - volatility * Math.random());
+                    break;
+                case 'stable':
+                    change = lastClose * volatility * (Math.random() * 2 - 1);
+                    break;
+            }
+
+            const close = lastClose + change;
+            const open = lastClose;
+            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
+            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
+            return [open, high, low, close];
+        }
+
+        function generateMonteCarloMarkovData(lastClose) {
+            const markovData = generateMarkovData(lastClose);
+            const monteCarloData = generateMonteCarloData(lastClose);
+            return [
+                (markovData[0] + monteCarloData[0]) / 2,
+                Math.max(markovData[1], monteCarloData[1]),
+                Math.min(markovData[2], monteCarloData[2]),
+                (markovData[3] + monteCarloData[3]) / 2
+            ];
+        }
+
         function createChart() {
             const options = {
                 series: [{
-                    data: data
+                    data: data.slice(-visibleCandlesticks)
                 }],
                 chart: {
                     type: 'candlestick',
@@ -84,9 +206,6 @@
                     },
                     toolbar: {
                         show: false
-                    },
-                    zoom: {
-                        enabled: false
                     }
                 },
                 title: {
@@ -131,7 +250,7 @@
         }
 
         function updateChart() {
-            chart.updateSeries([{ data: data }]);
+            chart.updateSeries([{ data: data.slice(-visibleCandlesticks) }]);
             chart.updateOptions({
                 title: {
                     text: `Forex Candlestick Chart (${currentInterval} min)`
@@ -140,31 +259,7 @@
         }
 
         function predictFuture(candlesticks) {
-            const trainingData = data.map(d => d.y[3]);
-            net.train([trainingData], { iterations: 100, log: true });
-
-            let input = trainingData.slice(-5);
-            let predictions = [];
-
-            for (let i = 0; i < candlesticks; i++) {
-                const prediction = net.run(input);
-                predictions.push(prediction);
-                input = [...input.slice(1), prediction];
-            }
-
-            return predictions;
-        }
-
-        function detectPattern(data) {
-            const closes = data.map(d => d.y[3]);
-            if (closes[closes.length - 1] > closes[closes.length - 2] && 
-                closes[closes.length - 2] > closes[closes.length - 3]) {
-                return "Uptrend detected";
-            } else if (closes[closes.length - 1] < closes[closes.length - 2] && 
-                       closes[closes.length - 2] < closes[closes.length - 3]) {
-                return "Downtrend detected";
-            }
-            return "No clear pattern";
+            return generateData(candlesticks, currentInterval, simulationMethod);
         }
 
         document.getElementById('playBtn').addEventListener('click', function() {
@@ -176,14 +271,13 @@
                 this.textContent = 'Pause';
                 isPlaying = true;
                 playInterval = setInterval(() => {
-                    const newData = generateData(1, currentInterval)[0];
-                    data.push(newData);
+                    const newData = generateData(1, currentInterval, simulationMethod);
+                    data = [...data, ...newData];
                     if (data.length > maxCandlesticks) {
-                        data.shift();
+                        data = data.slice(-maxCandlesticks);
                     }
-                    const pattern = detectPattern(data.slice(-5));
-                    console.log(`Pattern: ${pattern}`);
                     updateChart();
+                    saveState();
                 }, 1000);
             }
         });
@@ -191,19 +285,23 @@
         document.getElementById('predictBtn').addEventListener('click', function() {
             const candlesticks = parseInt(document.getElementById('futureCandlesticks').value) || 10;
             const predictions = predictFuture(candlesticks);
-            const lastDate = new Date(data[data.length - 1].x);
-            const newData = predictions.map((pred, index) => ({
-                x: new Date(lastDate.getTime() + (index + 1) * currentInterval * 60000).getTime(),
-                y: [pred, pred + Math.random() * 2, pred - Math.random() * 2, pred]
-            }));
-            data = [...data, ...newData].slice(-maxCandlesticks);
+            data = [...data, ...predictions];
+            if (data.length > maxCandlesticks) {
+                data = data.slice(-maxCandlesticks);
+            }
             updateChart();
+            saveState();
         });
 
         document.getElementById('exportBtn').addEventListener('click', function() {
             const config = {
                 data: data,
-                chartOptions: chart.opts
+                chartOptions: chart.opts,
+                simulationMethod,
+                volatility,
+                trend,
+                markovStates,
+                markovTransitionMatrix
             };
             const blob = new Blob([JSON.stringify(config, null, 2)], {type: 'application/json'});
             const url = URL.createObjectURL(blob);
@@ -218,13 +316,24 @@
 
         document.getElementById('timeInterval').addEventListener('change', function() {
             currentInterval = parseInt(this.value);
-            data = generateData(maxCandlesticks, currentInterval);
             updateChart();
+            saveState();
+        });
+
+        document.getElementById('simulationMethod').addEventListener('change', function() {
+            simulationMethod = this.value;
+            saveState();
         });
 
         // Initialize chart
-        data = generateData(maxCandlesticks, currentInterval);
+        loadState();
+        if (data.length === 0) {
+            data = generateData(visibleCandlesticks, currentInterval, simulationMethod);
+        }
         createChart();
+
+        // Train initial BrainJS model
+        net.train([data.map(d => d.y[3])], { iterations: 100, log: true });
     </script>
 </body>
 </html>
