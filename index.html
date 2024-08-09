@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+=<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
@@ -17,25 +17,22 @@
             <h1 class="text-3xl font-bold text-center text-gray-800">Advanced Candlestick Chart Simulator</h1>
         </div>
         <div id="controls" class="flex-none mb-4 space-x-4 flex justify-center items-center">
-            <button id="trainBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                Train
+            <button id="predictBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                Predict Future
             </button>
-            <div id="slider" class="w-64"></div>
-            <span id="sliderValue" class="text-lg font-semibold"></span>
+            <button id="editModeBtn" class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded">
+                Toggle Edit Mode
+            </button>
+            <input type="number" id="futureDays" class="border rounded p-2" placeholder="Days to predict" value="7">
         </div>
         <div id="chart" class="flex-grow"></div>
     </div>
 
-    <div id="dialog" title="Adjust Close Price" class="hidden">
-        <p>Enter new close price for the last candlestick:</p>
-        <input type="number" id="newClosePrice" class="w-full p-2 border rounded">
-    </div>
-
     <script>
-        // Initialize data
         let data = [];
         const totalPoints = 50;
         let lastClose = 100;
+        let editMode = false;
 
         // Generate initial random data
         for (let i = 0; i < totalPoints; i++) {
@@ -59,18 +56,49 @@
             }],
             chart: {
                 type: 'candlestick',
-                height: '100%'
+                height: '100%',
+                events: {
+                    mouseMove: function(event, chartContext, config) {
+                        if (editMode && config.dataPointIndex !== -1) {
+                            const newClose = config.globals.series[config.seriesIndex][config.dataPointIndex][4];
+                            updateCandlestick(config.dataPointIndex, newClose);
+                        }
+                    }
+                }
             },
             title: {
                 text: 'Candlestick Chart',
                 align: 'left'
             },
             xaxis: {
-                type: 'datetime'
+                type: 'datetime',
+                labels: {
+                    formatter: function(val) {
+                        return new Date(val).toLocaleDateString();
+                    }
+                }
             },
             yaxis: {
                 tooltip: {
                     enabled: true
+                },
+                opposite: true
+            },
+            tooltip: {
+                enabled: true,
+                custom: function({seriesIndex, dataPointIndex, w}) {
+                    const o = w.globals.seriesCandleO[seriesIndex][dataPointIndex];
+                    const h = w.globals.seriesCandleH[seriesIndex][dataPointIndex];
+                    const l = w.globals.seriesCandleL[seriesIndex][dataPointIndex];
+                    const c = w.globals.seriesCandleC[seriesIndex][dataPointIndex];
+                    return (
+                        '<div class="apexcharts-tooltip-box">' +
+                        '<div>Open: ' + o.toFixed(2) + '</div>' +
+                        '<div>High: ' + h.toFixed(2) + '</div>' +
+                        '<div>Low: ' + l.toFixed(2) + '</div>' +
+                        '<div>Close: ' + c.toFixed(2) + '</div>' +
+                        '</div>'
+                    );
                 }
             }
         };
@@ -81,67 +109,52 @@
         // Initialize brain.js network
         const net = new brain.recurrent.LSTMTimeStep();
 
-        // jQuery UI elements
-        $(document).ready(function() {
-            $("#slider").slider({
-                min: 0,
-                max: 200,
-                value: 100,
-                slide: function(event, ui) {
-                    $("#sliderValue").text(ui.value);
-                }
-            });
-            
-            $("#sliderValue").text($("#slider").slider("value"));
-
-            $("#dialog").dialog({
-                autoOpen: false,
-                modal: true,
-                buttons: {
-                    "Update": function() {
-                        const newClose = parseFloat($("#newClosePrice").val());
-                        if (!isNaN(newClose)) {
-                            updateChart(newClose);
-                            $(this).dialog("close");
-                        }
-                    },
-                    "Cancel": function() {
-                        $(this).dialog("close");
-                    }
-                }
-            });
-        });
-
-        // Train button functionality
-        $("#trainBtn").click(function() {
-            $("#newClosePrice").val(data[data.length - 1].y[3]);
-            $("#dialog").dialog("open");
-        });
-
-        function updateChart(newClose) {
-            const lastIndex = data.length - 1;
-            data[lastIndex].y[3] = newClose;
-            data[lastIndex].y[1] = Math.max(data[lastIndex].y[1], newClose);
-            data[lastIndex].y[2] = Math.min(data[lastIndex].y[2], newClose);
-
-            // Train the network
+        // Predict future prices
+        function predictFuture(days) {
             const trainingData = data.map(d => d.y[3]);
             net.train([trainingData], { iterations: 100, log: true });
 
-            // Generate new predictions
-            const input = trainingData.slice(-5);
-            const output = net.run(input);
+            let input = trainingData.slice(-5);
+            let predictions = [];
 
-            // Add new prediction to data
-            const newDataPoint = {
-                x: new Date(data[lastIndex].x).getTime() + 86400000, // Next day
-                y: [output, output + Math.random() * 2, output - Math.random() * 2, output]
-            };
-            data.push(newDataPoint);
+            for (let i = 0; i < days; i++) {
+                const prediction = net.run(input);
+                predictions.push(prediction);
+                input = [...input.slice(1), prediction];
+            }
 
-            // Update chart
+            return predictions;
+        }
+
+        // Update chart with new candlestick
+        function updateCandlestick(index, newClose) {
+            data[index].y[3] = newClose;
+            data[index].y[1] = Math.max(data[index].y[1], newClose);
+            data[index].y[2] = Math.min(data[index].y[2], newClose);
             chart.updateSeries([{ data: data }]);
         }
+
+        // Event listeners
+        document.getElementById('predictBtn').addEventListener('click', function() {
+            const days = parseInt(document.getElementById('futureDays').value) || 7;
+            const predictions = predictFuture(days);
+            
+            const lastDate = new Date(data[data.length - 1].x);
+            const newData = predictions.map((pred, index) => ({
+                x: new Date(lastDate.getTime() + (index + 1) * 86400000).getTime(),
+                y: [pred, pred + Math.random() * 2, pred - Math.random() * 2, pred]
+            }));
+
+            data = [...data, ...newData];
+            chart.updateSeries([{ data: data }]);
+        });
+
+        document.getElementById('editModeBtn').addEventListener('click', function() {
+            editMode = !editMode;
+            this.textContent = editMode ? 'Disable Edit Mode' : 'Enable Edit Mode';
+            this.classList.toggle('bg-red-500');
+            this.classList.toggle('bg-yellow-500');
+        });
     </script>
 </body>
 </html>
