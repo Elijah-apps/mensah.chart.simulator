@@ -27,6 +27,9 @@
             <button id="settingsBtn" class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded">
                 Settings
             </button>
+            <button id="clearBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                Clear
+            </button>
             <select id="timeInterval" class="border rounded p-2">
                 <option value="5">5 minutes</option>
                 <option value="15">15 minutes</option>
@@ -40,6 +43,10 @@
                 <option value="arima">ARIMA</option>
             </select>
             <input type="number" id="futureCandlesticks" class="border rounded p-2" placeholder="Candlesticks to predict" value="10">
+            <label class="flex items-center space-x-2">
+                <span>Range Slider</span>
+                <input type="checkbox" id="rangeSliderToggle" class="toggle-checkbox">
+            </label>
         </div>
         <div class="flex-grow relative">
             <div id="chart"></div>
@@ -50,18 +57,51 @@
     <div id="settingsModal" class="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 hidden">
         <div class="bg-white rounded-lg p-6 w-96">
             <h2 class="text-xl font-bold mb-4">Simulation Settings</h2>
+            
             <div class="mb-4">
                 <label for="volatility" class="block text-gray-700">Volatility:</label>
                 <input type="number" id="volatility" class="border rounded p-2 w-full" step="0.001" value="0.02">
             </div>
+            
+            <div class="mb-4">
+                <label for="candlestickVolatility" class="block text-gray-700">Candlestick Volatility:</label>
+                <input type="number" id="candlestickVolatility" class="border rounded p-2 w-full" step="0.001" value="0.01">
+            </div>
+
+            <div class="mb-4">
+                <label for="transitionVolatility" class="block text-gray-700">Transition Volatility:</label>
+                <input type="number" id="transitionVolatility" class="border rounded p-2 w-full" step="0.001" value="0.02">
+            </div>
+            
             <div class="mb-4">
                 <label for="trend" class="block text-gray-700">Trend:</label>
                 <input type="number" id="trend" class="border rounded p-2 w-full" step="0.001" value="0.001">
             </div>
+            
             <div class="mb-4">
                 <label for="arimaParams" class="block text-gray-700">ARIMA Parameters (p, d, q):</label>
                 <input type="text" id="arimaParams" class="border rounded p-2 w-full" placeholder="1,1,1">
             </div>
+            
+            <div class="mb-4">
+                <label for="priceLevel" class="block text-gray-700">Price Level:</label>
+                <input type="number" id="priceLevel" class="border rounded p-2 w-full" step="0.001" value="100">
+            </div>
+            
+            <div class="mb-4">
+                <h3 class="text-lg font-semibold mb-2">Wyckoff Parameters:</h3>
+                <label for="accumulationFrequency" class="block text-gray-700">Accumulation Frequency:</label>
+                <input type="number" id="accumulationFrequency" class="border rounded p-2 w-full" step="0.001" value="0.02">
+            </div>
+            <div class="mb-4">
+                <label for="consolidationFrequency" class="block text-gray-700">Consolidation Frequency:</label>
+                <input type="number" id="consolidationFrequency" class="border rounded p-2 w-full" step="0.001" value="0.02">
+            </div>
+            <div class="mb-4">
+                <label for="distributionFrequency" class="block text-gray-700">Distribution Frequency:</label>
+                <input type="number" id="distributionFrequency" class="border rounded p-2 w-full" step="0.001" value="0.02">
+            </div>
+            
             <button id="saveSettingsBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full">
                 Save Settings
             </button>
@@ -72,6 +112,7 @@
     </div>
 
     <script>
+        // Initialize state
         let data = [];
         let isPlaying = false;
         let playInterval;
@@ -79,19 +120,22 @@
         const maxCandlesticks = 1000; // Maximum number of candlesticks to generate
         const visibleCandlesticks = 100; // Number of candlesticks visible at once
         let simulationMethod = 'markov';
+        let showRangeSlider = true; // Default to showing range slider
 
         // Simulation parameters
         let volatility = 0.02;
         let trend = 0.001;
         let arimaParams = [1, 1, 1];
-        let markovStates = ['up', 'down', 'stable'];
-        let markovTransitionMatrix = [
-            [0.6, 0.3, 0.1],
-            [0.3, 0.6, 0.1],
-            [0.2, 0.2, 0.6]
-        ];
-        let currentMarkovState = 0;
+        let priceLevel = 100; // Default price level
+        let candlestickVolatility = 0.01;
+        let transitionVolatility = 0.02;
+        let wyckoffParams = {
+            accumulationFrequency: 0.02,
+            consolidationFrequency: 0.02,
+            distributionFrequency: 0.02
+        };
 
+        // Functions
         function saveState() {
             localStorage.setItem('forexSimulatorState', JSON.stringify({
                 data,
@@ -100,9 +144,10 @@
                 volatility,
                 trend,
                 arimaParams,
-                markovStates,
-                markovTransitionMatrix,
-                currentMarkovState
+                priceLevel,
+                candlestickVolatility,
+                transitionVolatility,
+                wyckoffParams
             }));
         }
 
@@ -116,257 +161,148 @@
                 volatility = state.volatility;
                 trend = state.trend;
                 arimaParams = state.arimaParams;
-                markovStates = state.markovStates;
-                markovTransitionMatrix = state.markovTransitionMatrix;
-                currentMarkovState = state.currentMarkovState;
+                priceLevel = state.priceLevel;
+                candlestickVolatility = state.candlestickVolatility;
+                transitionVolatility = state.transitionVolatility;
+                wyckoffParams = state.wyckoffParams;
                 document.getElementById('timeInterval').value = currentInterval;
                 document.getElementById('simulationMethod').value = simulationMethod;
-                updateChart();
+                document.getElementById('priceLevel').value = priceLevel;
+                document.getElementById('candlestickVolatility').value = candlestickVolatility;
+                document.getElementById('transitionVolatility').value = transitionVolatility;
+                document.getElementById('trend').value = trend;
+                document.getElementById('arimaParams').value = arimaParams.join(',');
+                document.getElementById('accumulationFrequency').value = wyckoffParams.accumulationFrequency;
+                document.getElementById('consolidationFrequency').value = wyckoffParams.consolidationFrequency;
+                document.getElementById('distributionFrequency').value = wyckoffParams.distributionFrequency;
             }
         }
 
-        function generateData(count, interval, method) {
-            let generatedData = [];
-            let lastClose = data.length > 0 ? data[data.length - 1].c : 100;
-            let baseDate = data.length > 0 ? new Date(data[data.length - 1].t) : new Date();
-
-            for (let i = 0; i < count; i++) {
-                let open, high, low, close, buySignal, sellSignal;
-
-                switch (method) {
-                    case 'markov':
-                        [open, high, low, close] = generateMarkovData(lastClose);
-                        break;
-                    case 'monteCarlo':
-                        [open, high, low, close] = generateMonteCarloData(lastClose);
-                        break;
-                    case 'markovMonteCarlo':
-                        [open, high, low, close] = generateMarkovMonteCarloData(lastClose);
-                        break;
-                    case 'arima':
-                        [open, high, low, close] = generateARIMAData(lastClose);
-                        break;
-                }
-
-                [buySignal, sellSignal] = generateTradingSignals(open, high, low, close);
-                
-                generatedData.push({
-                    t: new Date(baseDate.getTime() + (i + 1) * interval * 60000),
-                    o: open,
-                    h: high,
-                    l: low,
-                    c: close,
-                    buySignal,
-                    sellSignal
-                });
-
-                lastClose = close;
-            }
-            return generatedData;
-        }
-
-        function generateMarkovData(lastClose) {
-            const stateChange = Math.random();
-            let cumulativeProbability = 0;
-            for (let i = 0; i < markovStates.length; i++) {
-                cumulativeProbability += markovTransitionMatrix[currentMarkovState][i];
-                if (stateChange < cumulativeProbability) {
-                    currentMarkovState = i;
-                    break;
-                }
-            }
-
-            let change;
-            switch (markovStates[currentMarkovState]) {
-                case 'up':
-                    change = lastClose * (trend + volatility * Math.random());
-                    break;
-                case 'down':
-                    change = lastClose * (-trend - volatility * Math.random());
-                    break;
-                case 'stable':
-                    change = lastClose * volatility * (Math.random() * 2 - 1);
-                    break;
-            }
-
-            const close = lastClose + change;
-            const open = lastClose;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMonteCarloData(lastClose) {
-            const change = lastClose * (trend + volatility * (Math.random() * 2 - 1));
-            const close = lastClose + change;
-            const open = lastClose;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateMarkovMonteCarloData(lastClose) {
-            let [markovOpen, markovHigh, markovLow, markovClose] = generateMarkovData(lastClose);
-            let [monteCarloOpen, monteCarloHigh, monteCarloLow, monteCarloClose] = generateMonteCarloData(lastClose);
-
-            const open = (markovOpen + monteCarloOpen) / 2;
-            const high = (markovHigh + monteCarloHigh) / 2;
-            const low = (markovLow + monteCarloLow) / 2;
-            const close = (markovClose + monteCarloClose) / 2;
-
-            return [open, high, low, close];
-        }
-
-        function generateARIMAData(lastClose) {
-            const [p, d, q] = arimaParams;
-            const arimaModel = new ARIMA(data.map(d => d.c), p, d, q);
-            arimaModel.train();
-            const forecast = arimaModel.predict(1);
-            const close = forecast[0] + lastClose;
-            const open = lastClose;
-            const high = Math.max(open, close) + Math.random() * volatility * lastClose;
-            const low = Math.min(open, close) - Math.random() * volatility * lastClose;
-            return [open, high, low, close];
-        }
-
-        function generateTradingSignals(open, high, low, close) {
-            let buySignal = false;
-            let sellSignal = false;
-
-            if (open < close) {
-                buySignal = true;
-            } else if (open > close) {
-                sellSignal = true;
-            }
-
-            return [buySignal, sellSignal];
+        function generateData() {
+            // Placeholder for data generation logic
+            // Use the simulation method and parameters to generate candlestick data
+            data = Array.from({ length: maxCandlesticks }, (_, i) => ({
+                time: i,
+                open: priceLevel + Math.random() * volatility,
+                high: priceLevel + Math.random() * volatility * 2,
+                low: priceLevel - Math.random() * volatility * 2,
+                close: priceLevel + Math.random() * volatility
+            }));
         }
 
         function updateChart() {
-            const visibleData = data.slice(-visibleCandlesticks);
+            if (data.length === 0) return;
 
-            const traceCandlestick = {
-                x: visibleData.map(d => d.t),
-                close: visibleData.map(d => d.c),
-                decreasing: { line: { color: 'red' } },
-                high: visibleData.map(d => d.h),
-                increasing: { line: { color: 'green' } },
-                low: visibleData.map(d => d.l),
-                open: visibleData.map(d => d.o),
+            const chartData = data.slice(0, visibleCandlesticks).map((d) => ({
+                x: [d.time],
+                open: [d.open],
+                high: [d.high],
+                low: [d.low],
+                close: [d.close],
                 type: 'candlestick',
-                xaxis: 'x',
-                yaxis: 'y'
-            };
+                name: 'Candlestick'
+            }));
 
-            const traceBuy = {
-                x: visibleData.filter(d => d.buySignal).map(d => d.t),
-                y: visibleData.filter(d => d.buySignal).map(d => d.c),
-                mode: 'markers',
-                name: 'Buy Signal',
-                marker: { color: 'blue', symbol: 'triangle-up', size: 10 }
-            };
-
-            const traceSell = {
-                x: visibleData.filter(d => d.sellSignal).map(d => d.t),
-                y: visibleData.filter(d => d.sellSignal).map(d => d.c),
-                mode: 'markers',
-                name: 'Sell Signal',
-                marker: { color: 'orange', symbol: 'triangle-down', size: 10 }
-            };
-
-            const layout = {
-                dragmode: 'zoom',
-                margin: {
-                    r: 10,
-                    t: 25,
-                    b: 40,
-                    l: 60
-                },
-                showlegend: true,
-                xaxis: {
-                    rangeslider: {
-                        visible: true
-                    }
-                },
-                yaxis: {
-                    autorange: true
-                }
-            };
-
-            Plotly.newPlot('chart', [traceCandlestick, traceBuy, traceSell], layout);
+            Plotly.react('chart', chartData, {
+                xaxis: { title: 'Time' },
+                yaxis: { title: 'Price' }
+            });
         }
 
-        $(document).ready(function() {
-            loadState();
+        function handlePlayPause() {
+            if (isPlaying) {
+                clearInterval(playInterval);
+                document.getElementById('playBtn').innerText = 'Play';
+            } else {
+                playInterval = setInterval(() => {
+                    generateData();
+                    updateChart();
+                }, currentInterval);
+                document.getElementById('playBtn').innerText = 'Pause';
+            }
+            isPlaying = !isPlaying;
+        }
+
+        function handlePredict() {
+            // Placeholder for prediction logic
+            alert('Predict Future feature is not yet implemented.');
+        }
+
+        function handleExport() {
+            const config = {
+                data,
+                currentInterval,
+                simulationMethod,
+                volatility,
+                trend,
+                arimaParams,
+                priceLevel,
+                candlestickVolatility,
+                transitionVolatility,
+                wyckoffParams
+            };
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'configuration.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function handleSettings() {
+            document.getElementById('settingsModal').classList.remove('hidden');
+        }
+
+        function handleCloseSettings() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        function handleSaveSettings() {
+            volatility = parseFloat(document.getElementById('volatility').value);
+            trend = parseFloat(document.getElementById('trend').value);
+            arimaParams = document.getElementById('arimaParams').value.split(',').map(Number);
+            priceLevel = parseFloat(document.getElementById('priceLevel').value);
+            candlestickVolatility = parseFloat(document.getElementById('candlestickVolatility').value);
+            transitionVolatility = parseFloat(document.getElementById('transitionVolatility').value);
+            wyckoffParams = {
+                accumulationFrequency: parseFloat(document.getElementById('accumulationFrequency').value),
+                consolidationFrequency: parseFloat(document.getElementById('consolidationFrequency').value),
+                distributionFrequency: parseFloat(document.getElementById('distributionFrequency').value)
+            };
+            saveState();
+            handleCloseSettings();
+        }
+
+        function handleClear() {
+            data = [];
             updateChart();
+        }
 
-            $('#playBtn').click(function() {
-                if (!isPlaying) {
-                    isPlaying = true;
-                    $('#playBtn').text('Pause');
-                    playInterval = setInterval(function() {
-                        const newData = generateData(1, currentInterval, simulationMethod);
-                        data = data.concat(newData);
-                        if (data.length > maxCandlesticks) {
-                            data = data.slice(-maxCandlesticks);
-                        }
-                        updateChart();
-                        saveState();
-                    }, 1000);
-                } else {
-                    isPlaying = false;
-                    clearInterval(playInterval);
-                    $('#playBtn').text('Play');
-                }
-            });
+        function handleRangeSliderToggle() {
+            const rangeSlider = document.getElementById('rangeSlider');
+            if (showRangeSlider) {
+                rangeSlider.classList.remove('hidden');
+            } else {
+                rangeSlider.classList.add('hidden');
+            }
+            showRangeSlider = !showRangeSlider;
+        }
 
-            $('#predictBtn').click(function() {
-                const futureCount = parseInt($('#futureCandlesticks').val(), 10);
-                const newData = generateData(futureCount, currentInterval, simulationMethod);
-                data = data.concat(newData);
-                if (data.length > maxCandlesticks) {
-                    data = data.slice(-maxCandlesticks);
-                }
-                updateChart();
-                saveState();
-            });
+        // Event listeners
+        document.getElementById('playBtn').addEventListener('click', handlePlayPause);
+        document.getElementById('predictBtn').addEventListener('click', handlePredict);
+        document.getElementById('exportBtn').addEventListener('click', handleExport);
+        document.getElementById('settingsBtn').addEventListener('click', handleSettings);
+        document.getElementById('closeSettingsBtn').addEventListener('click', handleCloseSettings);
+        document.getElementById('saveSettingsBtn').addEventListener('click', handleSaveSettings);
+        document.getElementById('clearBtn').addEventListener('click', handleClear);
+        document.getElementById('rangeSliderToggle').addEventListener('change', handleRangeSliderToggle);
 
-            $('#exportBtn').click(function() {
-                const exportData = JSON.stringify(data);
-                const blob = new Blob([exportData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'forex_simulator_data.json';
-                a.click();
-            });
-
-            $('#timeInterval').change(function() {
-                currentInterval = parseInt($(this).val(), 10);
-                saveState();
-            });
-
-            $('#simulationMethod').change(function() {
-                simulationMethod = $(this).val();
-                saveState();
-            });
-
-            $('#settingsBtn').click(function() {
-                $('#settingsModal').removeClass('hidden');
-            });
-
-            $('#closeSettingsBtn').click(function() {
-                $('#settingsModal').addClass('hidden');
-            });
-
-            $('#saveSettingsBtn').click(function() {
-                volatility = parseFloat($('#volatility').val());
-                trend = parseFloat($('#trend').val());
-                arimaParams = $('#arimaParams').val().split(',').map(Number);
-                saveState();
-                $('#settingsModal').addClass('hidden');
-            });
-        });
+        // Initialize
+        loadState();
+        generateData();
+        updateChart();
     </script>
 </body>
 </html>
