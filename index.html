@@ -1,9 +1,9 @@
-=<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Candlestick Chart Simulator</title>
+    <title>Advanced Forex Candlestick Chart Simulator</title>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://unpkg.com/brain.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -14,111 +14,152 @@
 <body class="h-full bg-gray-100">
     <div class="flex flex-col h-full p-4">
         <div class="flex-none mb-4">
-            <h1 class="text-3xl font-bold text-center text-gray-800">Advanced Candlestick Chart Simulator</h1>
+            <h1 class="text-3xl font-bold text-center text-gray-800">Advanced Forex Candlestick Chart Simulator</h1>
         </div>
-        <div id="controls" class="flex-none mb-4 space-x-4 flex justify-center items-center">
-            <button id="predictBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+        <div id="controls" class="flex-none mb-4 space-x-4 flex justify-center items-center flex-wrap">
+            <button id="playBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                Play
+            </button>
+            <button id="predictBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
                 Predict Future
             </button>
-            <button id="editModeBtn" class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded">
-                Toggle Edit Mode
+            <button id="exportBtn" class="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
+                Export Configuration
             </button>
+            <select id="timeInterval" class="border rounded p-2">
+                <option value="5">5 minutes</option>
+                <option value="15">15 minutes</option>
+                <option value="240">4 hours</option>
+                <option value="1440" selected>1 day</option>
+            </select>
             <input type="number" id="futureDays" class="border rounded p-2" placeholder="Days to predict" value="7">
         </div>
-        <div id="chart" class="flex-grow"></div>
+        <div id="charts" class="flex-grow grid grid-cols-2 gap-4">
+            <div id="chart-5" class="h-96"></div>
+            <div id="chart-15" class="h-96"></div>
+            <div id="chart-240" class="h-96"></div>
+            <div id="chart-1440" class="h-96"></div>
+        </div>
     </div>
 
     <script>
-        let data = [];
-        const totalPoints = 50;
-        let lastClose = 100;
-        let editMode = false;
+        const timeIntervals = [5, 15, 240, 1440];
+        let charts = {};
+        let data = {};
+        let nets = {};
+        let isPlaying = false;
+        let playInterval;
 
-        // Generate initial random data
-        for (let i = 0; i < totalPoints; i++) {
-            const open = lastClose + (Math.random() - 0.5) * 5;
-            const close = open + (Math.random() - 0.5) * 5;
-            const high = Math.max(open, close) + Math.random() * 2;
-            const low = Math.min(open, close) - Math.random() * 2;
-            
-            data.push({
-                x: new Date(2024, 0, i + 1).getTime(),
-                y: [open, high, low, close]
-            });
+        timeIntervals.forEach(interval => {
+            data[interval] = generateData(50, interval);
+            nets[interval] = new brain.recurrent.LSTMTimeStep();
+            charts[interval] = createChart(interval);
+        });
 
-            lastClose = close;
+        function generateData(count, interval) {
+            let generatedData = [];
+            let lastClose = 100;
+            let baseDate = new Date(2024, 0, 1);
+
+            for (let i = 0; i < count; i++) {
+                const open = lastClose + (Math.random() - 0.5) * 5;
+                const close = open + (Math.random() - 0.5) * 5;
+                const high = Math.max(open, close) + Math.random() * 2;
+                const low = Math.min(open, close) - Math.random() * 2;
+                
+                generatedData.push({
+                    x: new Date(baseDate.getTime() + i * interval * 60000).getTime(),
+                    y: [open, high, low, close]
+                });
+
+                lastClose = close;
+            }
+            return generatedData;
         }
 
-        // Initialize chart
-        const options = {
-            series: [{
-                data: data
-            }],
-            chart: {
-                type: 'candlestick',
-                height: '100%',
-                events: {
-                    mouseMove: function(event, chartContext, config) {
-                        if (editMode && config.dataPointIndex !== -1) {
-                            const newClose = config.globals.series[config.seriesIndex][config.dataPointIndex][4];
-                            updateCandlestick(config.dataPointIndex, newClose);
+        function createChart(interval) {
+            const options = {
+                series: [{
+                    data: data[interval]
+                }],
+                chart: {
+                    type: 'candlestick',
+                    height: '100%',
+                    animations: {
+                        enabled: true,
+                        easing: 'linear',
+                        speed: 800,
+                        animateGradually: {
+                            enabled: true,
+                            delay: 150
+                        },
+                        dynamicAnimation: {
+                            enabled: true,
+                            speed: 350
+                        }
+                    },
+                    toolbar: {
+                        show: false
+                    },
+                    zoom: {
+                        enabled: false
+                    }
+                },
+                title: {
+                    text: `${interval} Minute Chart`,
+                    align: 'left'
+                },
+                xaxis: {
+                    type: 'datetime',
+                    labels: {
+                        formatter: function(val) {
+                            return new Date(val).toLocaleString();
                         }
                     }
-                }
-            },
-            title: {
-                text: 'Candlestick Chart',
-                align: 'left'
-            },
-            xaxis: {
-                type: 'datetime',
-                labels: {
-                    formatter: function(val) {
-                        return new Date(val).toLocaleDateString();
+                },
+                yaxis: {
+                    tooltip: {
+                        enabled: true
+                    },
+                    opposite: true
+                },
+                tooltip: {
+                    enabled: true,
+                    custom: function({seriesIndex, dataPointIndex, w}) {
+                        const o = w.globals.seriesCandleO[seriesIndex][dataPointIndex];
+                        const h = w.globals.seriesCandleH[seriesIndex][dataPointIndex];
+                        const l = w.globals.seriesCandleL[seriesIndex][dataPointIndex];
+                        const c = w.globals.seriesCandleC[seriesIndex][dataPointIndex];
+                        return (
+                            '<div class="apexcharts-tooltip-box">' +
+                            '<div>Open: ' + o.toFixed(2) + '</div>' +
+                            '<div>High: ' + h.toFixed(2) + '</div>' +
+                            '<div>Low: ' + l.toFixed(2) + '</div>' +
+                            '<div>Close: ' + c.toFixed(2) + '</div>' +
+                            '</div>'
+                        );
                     }
                 }
-            },
-            yaxis: {
-                tooltip: {
-                    enabled: true
-                },
-                opposite: true
-            },
-            tooltip: {
-                enabled: true,
-                custom: function({seriesIndex, dataPointIndex, w}) {
-                    const o = w.globals.seriesCandleO[seriesIndex][dataPointIndex];
-                    const h = w.globals.seriesCandleH[seriesIndex][dataPointIndex];
-                    const l = w.globals.seriesCandleL[seriesIndex][dataPointIndex];
-                    const c = w.globals.seriesCandleC[seriesIndex][dataPointIndex];
-                    return (
-                        '<div class="apexcharts-tooltip-box">' +
-                        '<div>Open: ' + o.toFixed(2) + '</div>' +
-                        '<div>High: ' + h.toFixed(2) + '</div>' +
-                        '<div>Low: ' + l.toFixed(2) + '</div>' +
-                        '<div>Close: ' + c.toFixed(2) + '</div>' +
-                        '</div>'
-                    );
-                }
-            }
-        };
+            };
 
-        const chart = new ApexCharts(document.querySelector("#chart"), options);
-        chart.render();
+            return new ApexCharts(document.querySelector(`#chart-${interval}`), options);
+        }
 
-        // Initialize brain.js network
-        const net = new brain.recurrent.LSTMTimeStep();
+        function updateCharts() {
+            timeIntervals.forEach(interval => {
+                charts[interval].updateSeries([{ data: data[interval] }]);
+            });
+        }
 
-        // Predict future prices
-        function predictFuture(days) {
-            const trainingData = data.map(d => d.y[3]);
-            net.train([trainingData], { iterations: 100, log: true });
+        function predictFuture(interval, days) {
+            const trainingData = data[interval].map(d => d.y[3]);
+            nets[interval].train([trainingData], { iterations: 100, log: true });
 
             let input = trainingData.slice(-5);
             let predictions = [];
 
             for (let i = 0; i < days; i++) {
-                const prediction = net.run(input);
+                const prediction = nets[interval].run(input);
                 predictions.push(prediction);
                 input = [...input.slice(1), prediction];
             }
@@ -126,34 +167,84 @@
             return predictions;
         }
 
-        // Update chart with new candlestick
-        function updateCandlestick(index, newClose) {
-            data[index].y[3] = newClose;
-            data[index].y[1] = Math.max(data[index].y[1], newClose);
-            data[index].y[2] = Math.min(data[index].y[2], newClose);
-            chart.updateSeries([{ data: data }]);
+        function detectPattern(data) {
+            // This is a simple example. In a real scenario, you'd implement more sophisticated pattern recognition
+            const closes = data.map(d => d.y[3]);
+            if (closes[closes.length - 1] > closes[closes.length - 2] && 
+                closes[closes.length - 2] > closes[closes.length - 3]) {
+                return "Uptrend detected";
+            } else if (closes[closes.length - 1] < closes[closes.length - 2] && 
+                       closes[closes.length - 2] < closes[closes.length - 3]) {
+                return "Downtrend detected";
+            }
+            return "No clear pattern";
         }
 
-        // Event listeners
-        document.getElementById('predictBtn').addEventListener('click', function() {
-            const days = parseInt(document.getElementById('futureDays').value) || 7;
-            const predictions = predictFuture(days);
-            
-            const lastDate = new Date(data[data.length - 1].x);
-            const newData = predictions.map((pred, index) => ({
-                x: new Date(lastDate.getTime() + (index + 1) * 86400000).getTime(),
-                y: [pred, pred + Math.random() * 2, pred - Math.random() * 2, pred]
-            }));
-
-            data = [...data, ...newData];
-            chart.updateSeries([{ data: data }]);
+        document.getElementById('playBtn').addEventListener('click', function() {
+            if (isPlaying) {
+                clearInterval(playInterval);
+                this.textContent = 'Play';
+                isPlaying = false;
+            } else {
+                this.textContent = 'Pause';
+                isPlaying = true;
+                playInterval = setInterval(() => {
+                    timeIntervals.forEach(interval => {
+                        const newData = generateData(1, interval)[0];
+                        data[interval].push(newData);
+                        data[interval].shift();
+                        const pattern = detectPattern(data[interval].slice(-5));
+                        console.log(`${interval} min chart: ${pattern}`);
+                    });
+                    updateCharts();
+                }, 1000);
+            }
         });
 
-        document.getElementById('editModeBtn').addEventListener('click', function() {
-            editMode = !editMode;
-            this.textContent = editMode ? 'Disable Edit Mode' : 'Enable Edit Mode';
-            this.classList.toggle('bg-red-500');
-            this.classList.toggle('bg-yellow-500');
+        document.getElementById('predictBtn').addEventListener('click', function() {
+            const days = parseInt(document.getElementById('futureDays').value) || 7;
+            timeIntervals.forEach(interval => {
+                const predictions = predictFuture(interval, days);
+                const lastDate = new Date(data[interval][data[interval].length - 1].x);
+                const newData = predictions.map((pred, index) => ({
+                    x: new Date(lastDate.getTime() + (index + 1) * interval * 60000).getTime(),
+                    y: [pred, pred + Math.random() * 2, pred - Math.random() * 2, pred]
+                }));
+                data[interval] = [...data[interval], ...newData];
+            });
+            updateCharts();
+        });
+
+        document.getElementById('exportBtn').addEventListener('click', function() {
+            const config = {
+                data: data,
+                chartOptions: charts[timeIntervals[0]].opts
+            };
+            const blob = new Blob([JSON.stringify(config, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'chart_config.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('timeInterval').addEventListener('change', function() {
+            const selectedInterval = parseInt(this.value);
+            timeIntervals.forEach(interval => {
+                if (interval === selectedInterval) {
+                    document.getElementById(`chart-${interval}`).style.display = 'block';
+                } else {
+                    document.getElementById(`chart-${interval}`).style.display = 'none';
+                }
+            });
+        });
+
+        // Initialize charts
+        timeIntervals.forEach(interval => {
+            charts[interval].render();
         });
     </script>
 </body>
